@@ -1,0 +1,122 @@
+name: Auto Copilot Fix
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    types: [labeled]
+
+jobs:
+  copilot-fix:
+    if: contains(github.event.label.name, 'copilot-fix')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Extract issue information
+        id: issue-info
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" == "issues" ]; then
+            ISSUE_NUMBER=${{ github.event.issue.number }}
+            ISSUE_TITLE="${{ github.event.issue.title }}"
+            ISSUE_BODY="${{ github.event.issue.body }}"
+          else
+            ISSUE_NUMBER=${{ github.event.pull_request.number }}
+            ISSUE_TITLE="${{ github.event.pull_request.title }}"
+            ISSUE_BODY="${{ github.event.pull_request.body }}"
+          fi
+
+          echo "number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          echo "title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
+
+      - name: Create fix branch
+        run: |
+          BRANCH_NAME="copilot-fix-${{ steps.issue-info.outputs.number }}-$(date +%s)"
+          git checkout -b "$BRANCH_NAME"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Analyze and suggest fix
+        id: suggest-fix
+        run: |
+          echo "Analyzing issue: ${{ steps.issue-info.outputs.title }}"
+
+          if echo "${{ steps.issue-info.outputs.title }}" | grep -iq "typo"; then
+            echo "fix_type=typo" >> $GITHUB_OUTPUT
+          elif echo "${{ steps.issue-info.outputs.title }}" | grep -iq "lint"; then
+            echo "fix_type=lint" >> $GITHUB_OUTPUT
+          elif echo "${{ steps.issue-info.outputs.title }}" | grep -iq "format"; then
+            echo "fix_type=format" >> $GITHUB_OUTPUT
+          else
+            echo "fix_type=generic" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Apply automated fix
+        run: |
+          case "${{ steps.suggest-fix.outputs.fix_type }}" in
+            "lint")
+              npm install
+              npx eslint . --fix || true
+              ;;
+            "format")
+              npx prettier --write "**/*.{js,jsx,ts,tsx,json,css,md}" || true
+              ;;
+            "typo")
+              echo "Typo fix placeholder"
+              ;;
+            *)
+              echo "Generic fix placeholder"
+              ;;
+          esac
+
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add -A
+
+          if git diff --staged --quiet; then
+            echo "NO_CHANGES=true" >> $GITHUB_ENV
+          else
+            git commit -m "🤖 Auto-fix for issue #${{ steps.issue-info.outputs.number }}"
+            git push origin "$BRANCH_NAME"
+            echo "NO_CHANGES=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create Pull Request
+        if: env.NO_CHANGES == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --title "🤖 Auto-fix for #${{ steps.issue-info.outputs.number }}: ${{ steps.issue-info.outputs.title }}" \
+            --body "This PR was automatically generated to fix issue #${{ steps.issue-info.outputs.number }}
+
+**Issue:** #${{ steps.issue-info.outputs.number }}
+**Fix Type:** ${{ steps.suggest-fix.outputs.fix_type }}
+
+Please review the changes and merge if appropriate." \
+            --label "auto-generated,auto-merge" \
+            --base ${{ github.event.repository.default_branch }} \
+            --head "$BRANCH_NAME" \
+            --repo ${{ github.repository }}
+
+      - name: Comment on issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$NO_CHANGES" == "false" ]; then
+            gh issue comment ${{ steps.issue-info.outputs.number }} --body "🤖 Auto-fix PR created! Please review." --repo ${{ github.repository }}
+          else
+            gh issue comment ${{ steps.issue-info.outputs.number }} --body "🤖 No automated fix could be applied. Manual intervention required." --repo ${{ github.repository }}
+          fi
