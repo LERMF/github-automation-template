@@ -1,0 +1,74 @@
+name: Auto Resolve Conflicts
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  check-conflicts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+
+      - name: Check for conflicts
+        id: check-conflict
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          if git merge-tree $(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }}) HEAD origin/${{ github.event.pull_request.base.ref }} | grep -q "<<<<<<< "; then
+            echo "has_conflict=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_conflict=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Try auto-resolve conflicts
+        if: steps.check-conflict.outputs.has_conflict == 'true'
+        id: auto-resolve
+        run: |
+          git merge origin/${{ github.event.pull_request.base.ref }} -X ours -m "Auto-resolve conflicts" || true
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            for file in $(git diff --name-only --diff-filter=U); do
+              if [[ "$file" == *"package-lock.json"* ]] || [[ "$file" == *"yarn.lock"* ]]; then
+                git checkout --ours "$file"
+                git add "$file"
+              elif [[ "$file" == *".md"* ]]; then
+                git checkout --theirs "$file"
+                git add "$file"
+              fi
+            done
+
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo "resolved=partial" >> $GITHUB_OUTPUT
+            else
+              echo "resolved=full" >> $GITHUB_OUTPUT
+              git commit -m "🤖 Auto-resolved merge conflicts"
+              git push
+            fi
+          else
+            echo "resolved=full" >> $GITHUB_OUTPUT
+            git push
+          fi
+
+      - name: Comment on PR
+        if: steps.check-conflict.outputs.has_conflict == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.auto-resolve.outputs.resolved }}" == "full" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body "✅ Conflicts auto-resolved successfully!" --repo ${{ github.repository }}
+          elif [ "${{ steps.auto-resolve.outputs.resolved }}" == "partial" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body "⚠️ Some conflicts resolved automatically, manual review needed." --repo ${{ github.repository }}
+          fi
