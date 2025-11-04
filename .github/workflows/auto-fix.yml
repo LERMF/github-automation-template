@@ -1,0 +1,51 @@
+name: Auto Fix Code Issues
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches-ignore:
+      - main
+      - master
+
+jobs:
+  auto-fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run ESLint auto-fix
+        continue-on-error: true
+        run: |
+          if [ -f "package.json" ] && grep -q "eslint" package.json; then
+            npm install
+            npx eslint . --fix || true
+          fi
+
+      - name: Run Prettier
+        continue-on-error: true
+        run: |
+          if [ -f "package.json" ] && grep -q "prettier" package.json; then
+            npx prettier --write "**/*.{js,jsx,ts,tsx,json,css,md}" || true
+          fi
+
+      - name: Commit auto-fixes
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add -A
+          if ! git diff --staged --quiet; then
+            git commit -m "🤖 Auto-fix: code formatting and linting"
+            git push
+          fi
