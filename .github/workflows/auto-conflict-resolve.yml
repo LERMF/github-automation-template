@@ -1,0 +1,23 @@
+name: Auto Conflict Rebase
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-conflicts:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check Mergeability
+        uses: eps1lon/actions-label-merge-conflict@v3
+        with:
+          dirtyLabel: "conflict"
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          commentOnDirty: "⚠️ Merge conflict detected on this branch. Please rebase against the latest target branch."

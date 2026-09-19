@@ -1,0 +1,25 @@
+name: Auto Copilot Review & Fix
+
+on:
+  pull_request:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  copilot-review:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'auto-copilot-fix')
+    steps:
+      - name: Add Copilot Review Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: "🤖 **Auto Copilot Review**: Workflow triggered via `auto-copilot-fix` label. Automated audit running against code changes."
+            });

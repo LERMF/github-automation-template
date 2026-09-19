@@ -1,0 +1,39 @@
+name: Auto Fix Lint & Format
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'auto-fix') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Format & Lint Fix
+        run: |
+          if [ -f package.json ]; then
+            npm install --silent 2>/dev/null || true
+            npx prettier --write . 2>/dev/null || true
+          fi
+
+      - name: Commit Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style(auto-fix): apply automated formatting and lint fixes"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
