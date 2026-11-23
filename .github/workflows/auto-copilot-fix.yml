@@ -14,7 +14,7 @@ jobs:
     if: contains(github.event.pull_request.labels.*.name, 'auto-copilot-fix')
     steps:
       - name: Add Copilot Review Comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.createComment({
